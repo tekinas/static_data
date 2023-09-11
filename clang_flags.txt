@@ -1,0 +1,1 @@
+-Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -stdlib=libc++ -march=native -fconstexpr-backtrace-limit=0 -fconstexpr-depth=4294967295 -fconstexpr-steps=4294967295 -ftemplate-depth=4294967295
