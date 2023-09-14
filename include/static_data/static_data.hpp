@@ -74,7 +74,7 @@ template<typename T>
 concept ToStaticDataFreeFun = requires(T &value) { to_static_data(std::move(value)); };
 
 template<typename T>
-concept CValue =
+concept TrivialValue =
         std::is_trivially_copyable_v<T> and
         not(stdr::range<T> or Tuple<T> or is_specialization<T, std::variant> or is_specialization<T, std::optional> or
             is_specialization<T, std::expected> or std::is_pointer_v<T> or is_specialization<T, std::unique_ptr> or
@@ -83,7 +83,7 @@ concept CValue =
 template<auto...>
 constexpr int int_v{};
 
-template<CValue T>
+template<TrivialValue T>
 constexpr size_t writeToBytes(T value, std::byte *ptr) {
     using Bytes = std::array<std::byte, sizeof(T)>;
     unroll<sizeof(T)>([ptr, bytes = std::bit_cast<Bytes>(value)]<size_t i> {
@@ -92,19 +92,19 @@ constexpr size_t writeToBytes(T value, std::byte *ptr) {
     return sizeof value;
 }
 
-template<CValue Value>
+template<TrivialValue T>
 constexpr auto readFromBytes(std::byte const *ptr) {
-    std::array<std::byte, sizeof(Value)> bytes;
+    std::array<std::byte, sizeof(T)> bytes;
     for (auto &b : bytes) b = *ptr++;
-    return std::bit_cast<Value>(bytes);
+    return std::bit_cast<T>(bytes);
 }
 
-template<CValue Value, size_t N>
+template<TrivialValue T, size_t N>
     requires(N != 0)
 constexpr auto readFromBytes(std::byte const *ptr) {
-    std::array<std::byte, sizeof(Value) * N> bytes;
+    std::array<std::byte, sizeof(T) * N> bytes;
     for (auto &b : bytes) b = *ptr++;
-    return std::bit_cast<std::array<Value, N>>(bytes);
+    return std::bit_cast<std::array<T, N>>(bytes);
 }
 
 struct SpanOff {
@@ -139,14 +139,14 @@ constexpr void writeAt(T &&value, std::byte *&ptr) {
         writeAt(to_static_data(std::move(value)), ptr);
     else if constexpr (stdr::input_range<T>) {
         if constexpr (using value_t = stdr::range_value_t<T>; stdr::input_range<value_t>) writeNestedRange(value, ptr);
-        else if constexpr (stdr::sized_range<T> and CValue<value_t>) {
+        else if constexpr (stdr::sized_range<T> and TrivialValue<value_t>) {
             ptr += writeToBytes<size_t>(stdr::size(value), ptr);
             for (auto &&e : value) ptr += writeToBytes(e, ptr);
         } else {
             auto start = ptr;
             size_t size = 0;
             for (ptr += sizeof(size_t); auto &&e : value) {
-                if constexpr (CValue<value_t>) ptr += writeToBytes(e, ptr);
+                if constexpr (TrivialValue<value_t>) ptr += writeToBytes(e, ptr);
                 else
                     writeAt(e, ptr);
                 ++size;
@@ -171,13 +171,13 @@ constexpr void writeAt(T &&value, std::byte *&ptr) {
         ptr += writeToBytes<bool>(value != nullptr, ptr);
         if (value) writeAt(*value, ptr);
     } else {
-        static_assert(CValue<DT>);
+        static_assert(TrivialValue<DT>);
         ptr += writeToBytes(value, ptr);
     }
 }
 
 template<typename T>
-struct Type {};
+struct Trivial {};
 
 template<typename T>
 struct Array {};
@@ -248,8 +248,8 @@ constexpr auto writef() {
     else if constexpr (is_specialization<DT, std::unique_ptr>)
         return Pointer<decltype(writef<typename DT::element_type>())>{};
     else {
-        static_assert(CValue<DT>);
-        return Type<DT>{};
+        static_assert(TrivialValue<DT>);
+        return Trivial<DT>{};
     }
 }
 
@@ -282,7 +282,7 @@ private:
 };
 
 template<typename T>
-auto readf(Type<T>) -> T;
+auto readf(Trivial<T>) -> T;
 
 template<typename T>
 auto readf(Array<T>) -> std::span<decltype(readf(T{})) const>;
@@ -345,18 +345,18 @@ public:
     static constexpr auto readAt(auto) = delete;
 
     template<size_t pos, typename T>
-    static constexpr auto readAt(Type<T>) {
+    static constexpr auto readAt(Trivial<T>) {
         return result<pos + sizeof(T)>(readFromBytes<T>(ptr(pos)));
     }
 
     template<size_t pos, typename T>
-    static constexpr auto readAt(Array<Type<T>>) {
+    static constexpr auto readAt(Array<Trivial<T>>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
             static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
             return result<data_pos + sizeof array>(std::span<T const>{array});
         } else
-            return result<data_pos>(read_t<Array<Type<T>>>{});
+            return result<data_pos>(read_t<Array<Trivial<T>>>{});
     }
 
     template<size_t pos, typename T>
@@ -370,13 +370,13 @@ public:
     }
 
     template<size_t pos, size_t N, typename T>
-    static constexpr auto readAt(NestedArray<N, Type<T>>) {
+    static constexpr auto readAt(NestedArray<N, Trivial<T>>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
             static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
             return readRngs<data_pos + sizeof array, N>([](size_t i) { return &array[i]; });
         } else
-            return readRngs<data_pos, N>([](size_t) -> read_t<Type<T>> const * { return nullptr; });
+            return readRngs<data_pos, N>([](size_t) -> read_t<Trivial<T>> const * { return nullptr; });
     }
 
     template<size_t pos, size_t N, typename T>
