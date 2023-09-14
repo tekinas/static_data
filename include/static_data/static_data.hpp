@@ -59,12 +59,6 @@ constexpr decltype(auto) applyTuple(auto &&func, T &&tuple)
             [&]<auto... I> -> decltype(auto) { return func(getElm<I>(tuple)...); });
 }
 
-template<Tuple tuple>
-constexpr decltype(auto) applyTypeSeq(auto &&func) {
-    return applyIdxSeq<std::tuple_size_v<tuple>>(
-            [&]<auto... I> -> decltype(auto) { return func.template operator()<std::tuple_element_t<I, tuple>...>(); });
-}
-
 namespace stdr = std::ranges;
 
 template<typename T, template<typename...> class Ref>
@@ -240,7 +234,8 @@ constexpr auto writef() {
         else
             return Array<decltype(writef<value_t>())>{};
     } else if constexpr (Tuple<DT>)
-        return applyTypeSeq<DT>([]<typename... TE> { return Tup<decltype(writef<TE>())...>{}; });
+        return applyIdxSeq<std::tuple_size_v<DT>>(
+                []<size_t... i> { return Tup<decltype(writef<std::tuple_element_t<i, DT>>())...>{}; });
     else if constexpr (is_specialization<DT, std::variant>)
         return applyIdxSeq<std::variant_size_v<DT>>(
                 []<size_t... i> { return Variant<decltype(writef<std::variant_alternative_t<i, DT>>())...>{}; });
@@ -396,7 +391,7 @@ public:
 
     template<size_t pos, typename... T>
     static constexpr auto readAt(Tup<T...>) {
-        if constexpr (sizeof...(T)) return readTuple<pos, 0, sizeof...(T)>(std::tuple<T...>{});
+        if constexpr (sizeof...(T)) return readTuple<pos, T...>();
         else
             return result<pos>(std::tuple{});
     }
@@ -523,10 +518,10 @@ private:
             return result<next_pos>(span_t{});
     }
 
-    template<size_t pos, size_t index, size_t size>
-    static constexpr auto readTuple(auto tup, auto &...elems) {
-        constexpr auto res = readAt<pos>(get<index>(tup));
-        if constexpr ((index + 1) != size) return readTuple<res.next_pos, index + 1, size>(tup, elems..., res.value);
+    template<size_t pos, typename T, typename... RT>
+    static constexpr auto readTuple(auto &...elems) {
+        constexpr auto res = readAt<pos>(T{});
+        if constexpr (sizeof...(RT)) return readTuple<res.next_pos, RT...>(elems..., res.value);
         else
             return result<res.next_pos>(std::tuple{elems..., res.value});
     }
