@@ -329,11 +329,16 @@ auto readf(CustomData<T, WT>) -> decltype([](auto read_v) {
 template<typename T, typename WT>
 auto readf(Recursive<T, WT>) -> StaticPtr<T, WT>;
 
-template<typename value_type>
+template<size_t pos, typename value_type>
 struct Result {
+    static constexpr auto next_pos = pos;
     value_type value;
-    size_t nextPos;
 };
+
+template<size_t pos, typename T>
+constexpr auto result(T &&value) {
+    return Result<pos, std::remove_cvref_t<T>>{value};
+}
 
 template<auto &buffer>
 class Reader {
@@ -346,40 +351,61 @@ public:
 
     template<size_t pos, typename T>
     static constexpr auto readAt(Type<T>) {
-        return Result{readFromBytes<T>(ptr(pos)), pos + sizeof(T)};
+        return result<pos + sizeof(T)>(readFromBytes<T>(ptr(pos)));
+    }
+
+    template<size_t pos, typename T>
+    static constexpr auto readAt(Array<Type<T>>) {
+        constexpr auto data_pos = pos + sizeof(size_t);
+        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
+            static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
+            return result<data_pos + sizeof array>(std::span<T const>{array});
+        } else
+            return result<data_pos>(read_t<Array<Type<T>>>{});
     }
 
     template<size_t pos, typename T>
     static constexpr auto readAt(Array<T>) {
         constexpr auto data_pos = pos + sizeof(size_t);
-        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) return readArray<data_pos, count>(T{});
-        else
-            return Result{read_t<Array<T>>{}, data_pos};
+        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
+            static constexpr auto res = readNTArray<data_pos, count, T>();
+            return result<res.next_pos>(std::span{&res.value[0].value, count});
+        } else
+            return result<data_pos>(read_t<Array<T>>{});
+    }
+
+    template<size_t pos, size_t N, typename T>
+    static constexpr auto readAt(NestedArray<N, Type<T>>) {
+        constexpr auto data_pos = pos + sizeof(size_t);
+        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
+            static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
+            return readRngs<data_pos + sizeof array, N>([](size_t i) { return &array[i]; });
+        } else
+            return readRngs<data_pos, N>([](size_t) -> read_t<Type<T>> const * { return nullptr; });
     }
 
     template<size_t pos, size_t N, typename T>
     static constexpr auto readAt(NestedArray<N, T>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            constexpr auto res = readArray<data_pos, count>(T{});
-            static constexpr auto value_ptr = res.value.data();
-            return readRngs<res.nextPos, N>([] { return value_ptr; });
+            static constexpr auto res = readNTArray<data_pos, count, T>();
+            return readRngs<res.next_pos, N>([](size_t i) { return &res.value[i].value; });
         } else
-            return readRngs<data_pos, N>([] -> read_t<T> const * { return nullptr; });
+            return readRngs<data_pos, N>([](size_t) -> read_t<T> const * { return nullptr; });
     }
 
     template<size_t pos, typename... T>
     static constexpr auto readAt(Tup<T...>) {
         if constexpr (sizeof...(T)) return readTuple<pos, 0, sizeof...(T)>(std::tuple<T...>{});
         else
-            return Result{std::tuple{}, pos};
+            return result<pos>(std::tuple{});
     }
 
     template<size_t pos, typename... T>
     static constexpr auto readAt(Variant<T...>) {
         constexpr auto index = readFromBytes<size_t>(ptr(pos));
         constexpr auto res = readAt<pos + sizeof(size_t)>(std::tuple_element_t<index, std::tuple<T...>>{});
-        return Result{read_t<Variant<T...>>{std::in_place_index<index>, res.value}, res.nextPos};
+        return result<res.next_pos>(read_t<Variant<T...>>{std::in_place_index<index>, res.value});
     }
 
     template<size_t pos, typename T>
@@ -387,9 +413,9 @@ public:
         constexpr auto data_pos = pos + sizeof(bool);
         if constexpr (using ROptional = read_t<Optional<T>>; constexpr auto has_value = readFromBytes<bool>(ptr(pos))) {
             constexpr auto res = readAt<data_pos>(T{});
-            return Result{ROptional{res.value}, res.nextPos};
+            return result<res.next_pos>(ROptional{res.value});
         } else
-            return Result{ROptional{}, data_pos};
+            return result<data_pos>(ROptional{});
     }
 
     template<size_t pos, typename T, typename E>
@@ -398,10 +424,10 @@ public:
         constexpr auto data_pos = pos + sizeof(bool);
         if constexpr (readFromBytes<bool>(ptr(pos))) {
             constexpr auto res = readAt<data_pos>(T{});
-            return Result{RExpected{res.value}, res.nextPos};
+            return result<res.next_pos>(RExpected{res.value});
         } else {
             constexpr auto res = readAt<data_pos>(E{});
-            return Result{RExpected{std::unexpect, res.value}, res.nextPos};
+            return result<res.next_pos>(RExpected{std::unexpect, res.value});
         }
     }
 
@@ -409,10 +435,10 @@ public:
     static constexpr auto readAt(Expected<void, E>) {
         using RExpected = read_t<Expected<void, E>>;
         constexpr auto data_pos = pos + sizeof(bool);
-        if constexpr (readFromBytes<bool>(ptr(pos))) return Result{RExpected{}, data_pos};
+        if constexpr (readFromBytes<bool>(ptr(pos))) return result<data_pos>(RExpected{});
         else {
             constexpr auto res = readAt<data_pos>(E{});
-            return Result{RExpected{std::unexpect, res.value}, res.nextPos};
+            return result<res.next_pos>(RExpected{std::unexpect, res.value});
         }
     }
 
@@ -420,19 +446,18 @@ public:
     static constexpr auto readAt(Pointer<T>) {
         constexpr auto data_pos = pos + sizeof(bool);
         if constexpr (constexpr auto has_value = readFromBytes<bool>(ptr(pos))) {
-            constexpr auto res = readAt<data_pos>(T{});
-            static constexpr auto value = res.value;
-            return Result{&value, res.nextPos};
+            static constexpr auto res = readAt<data_pos>(T{});
+            return result<res.next_pos>(&res.value);
         } else
-            return Result{read_t<Pointer<T>>{}, data_pos};
+            return result<data_pos>(read_t<Pointer<T>>{});
     }
 
     template<size_t pos, typename T, typename WT>
     static constexpr auto readAt(CustomData<T, WT>) {
         if constexpr (constexpr auto res = readAt<pos>(WT{}); requires { T::from_static_data(res.value); })
-            return Result{T::from_static_data(res.value), res.nextPos};
+            return result<res.next_pos>(T::from_static_data(res.value));
         else if constexpr (requires { from_static_data(std::type_identity<T>{}, res.value); })
-            return Result{from_static_data(std::type_identity<T>{}, res.value), res.nextPos};
+            return result<res.next_pos>(from_static_data(std::type_identity<T>{}, res.value));
         else
             return res;
     }
@@ -447,78 +472,63 @@ public:
             else
                 return res.value;
         }();
-        return Result{StaticPtr<T, WT>{&rcrsv_value}, res.nextPos};
+        return result<res.next_pos>(StaticPtr<T, WT>{&rcrsv_value});
     }
 
 private:
     static constexpr auto ptr(size_t pos) { return buffer.data() + pos; }
 
-    template<size_t pos, size_t count, typename T>
-    static constexpr auto readArray(Type<T>) {
-        static constexpr auto array = readFromBytes<T, count>(ptr(pos));
-        return Result{std::span<T const>{array}, pos + sizeof array};
-    }
-
     template<size_t pos, typename T, size_t index, size_t count>
     static constexpr auto readRcrsv(auto &array) {
         constexpr auto res = readAt<pos>(T{});
-        if constexpr (std::is_default_constructible_v<read_t<T>>) array[index] = res.value;
+        std::construct_at(&array[index].value, res.value);
+        if constexpr ((index + 1) != count) return readRcrsv<res.next_pos, T, index + 1, count>(array);
         else
-            std::construct_at(&array[index].value, res.value);
-        if constexpr ((index + 1) != count) return readRcrsv<res.nextPos, T, index + 1, count>(array);
-        else
-            return res.nextPos;
+            return result<res.next_pos>(0);
     }
 
     template<size_t pos, size_t count, typename T>
-    static constexpr auto readArray(T) {
+    static constexpr auto readNTArray() {
         using value_t = read_t<T>;
-        constexpr auto res = [] {
-            union Storage {
-                value_t value;
-                constexpr Storage() {}
-                constexpr ~Storage() {}
-            };
-            constexpr auto is_dc = std::is_default_constructible_v<value_t>;
-            std::array<std::conditional_t<is_dc, value_t, Storage>, count> array;
-            auto const nextPos = readRcrsv<pos, T, 0, count>(array);
-            if constexpr (is_dc) return Result{array, nextPos};
-            else
-                return Result{applyIdxSeq<count>([&]<size_t... i> { return std::array{array[i].value...}; }), nextPos};
-        }();
-        static constexpr auto array = res.value;
-        return Result{std::span<value_t const>{array}, res.nextPos};
+        union Storage {
+            value_t value;
+            constexpr Storage() {}
+            constexpr ~Storage() {}
+        };
+        std::array<Storage, count> array;
+        auto const res = readRcrsv<pos, T, 0, count>(array);
+        return result<res.next_pos>(array);
     }
 
     template<size_t pos, size_t depth>
-    static constexpr auto readRngs(auto prev_data) {
+    static constexpr auto readRngs(auto prev_addr) {
         constexpr auto count = readFromBytes<size_t>(ptr(pos));
-        constexpr auto nextPos = pos + sizeof(size_t) + sizeof(SpanOff) * count;
-        using prev_t = std::remove_cvref_t<decltype(*prev_data())>;
+        constexpr auto next_pos = pos + sizeof(size_t) + sizeof(SpanOff) * count;
+        using prev_t = std::remove_cvref_t<decltype(*prev_addr(0))>;
         using span_t = std::span<std::span<prev_t const> const>;
         if constexpr (count) {
             static constexpr auto span_arr = [&] {
                 auto const off_arr = readFromBytes<SpanOff, count>(ptr(pos + sizeof(size_t)));
                 std::array<std::span<prev_t const>, count> span_arr;
                 for (size_t i = 0; i != count; ++i)
-                    span_arr[i] = std::span{prev_data() + off_arr[i].base, off_arr[i].size};
+                    span_arr[i] = std::span{prev_addr(off_arr[i].base), off_arr[i].size};
                 return span_arr;
             }();
-            if constexpr (depth) return readRngs<nextPos, depth - 1>([] { return span_arr.data(); });
+            if constexpr (depth) return readRngs<next_pos, depth - 1>([](size_t i) { return &span_arr[i]; });
             else
-                return Result{span_t{span_arr}, nextPos};
+                return result<next_pos>(span_t{span_arr});
         } else if constexpr (depth)
-            return readRngs<nextPos, depth - 1>([] { return span_t{}.data(); });
+            return readRngs<next_pos, depth - 1>([](size_t) { return span_t{}.data(); });
         else
-            return Result{span_t{}, nextPos};
+            return result<next_pos>(span_t{});
     }
 
     template<size_t pos, size_t index, size_t size>
     static constexpr auto readTuple(auto tup, auto &...elems) {
         constexpr auto res = readAt<pos>(get<index>(tup));
-        if constexpr ((index + 1) != size) return readTuple<res.nextPos, index + 1, size>(tup, elems..., res.value);
+        if constexpr ((index + 1) != size) return readTuple<res.next_pos, index + 1, size>(tup, elems..., res.value);
         else
-            return Result{std::tuple{elems..., res.value}, res.nextPos};
+            return result<res.next_pos>(std::tuple{elems..., res.value});
     }
 };
 }// namespace tek::detail
