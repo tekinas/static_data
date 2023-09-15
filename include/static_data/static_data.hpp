@@ -364,7 +364,7 @@ public:
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
             static constexpr auto res = readNTArray<data_pos, count, T>();
-            return result<res.next_pos>(std::span{&res.value[0].value, count});
+            return result<res.next_pos>(std::span{res.value.data(), count});
         } else
             return result<data_pos>(read_t<Array<T>>{});
     }
@@ -384,7 +384,7 @@ public:
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
             static constexpr auto res = readNTArray<data_pos, count, T>();
-            return readRngs<res.next_pos, N>([](size_t i) { return &res.value[i].value; });
+            return readRngs<res.next_pos, N>([](size_t i) { return res.value.data() + i; });
         } else
             return readRngs<data_pos, N>([](size_t) -> read_t<T> const * { return nullptr; });
     }
@@ -476,7 +476,9 @@ private:
     template<size_t pos, typename T, size_t index, size_t count>
     static constexpr auto readRcrsv(auto &array) {
         constexpr auto res = readAt<pos>(T{});
-        std::construct_at(&array[index].value, res.value);
+        if constexpr (std::is_default_constructible_v<read_t<T>>) array[index] = res.value;
+        else
+            std::construct_at(&array[index].value, res.value);
         if constexpr ((index + 1) != count) return readRcrsv<res.next_pos, T, index + 1, count>(array);
         else
             return result<res.next_pos>(0);
@@ -490,9 +492,11 @@ private:
             constexpr Storage() {}
             constexpr ~Storage() {}
         };
-        std::array<Storage, count> array;
+        std::array<std::conditional_t<std::is_default_constructible_v<value_t>, value_t, Storage>, count> array;
         auto const res = readRcrsv<pos, T, 0, count>(array);
-        return result<res.next_pos>(array);
+        if constexpr (std::is_default_constructible_v<value_t>) return result<res.next_pos>(array);
+        else
+            return result<res.next_pos>(applyIdxSeq<count>([&]<size_t... i> { return std::array{array[i].value...}; }));
     }
 
     template<size_t pos, size_t depth>
@@ -503,10 +507,9 @@ private:
         using span_t = std::span<std::span<prev_t const> const>;
         if constexpr (count) {
             static constexpr auto span_arr = [&] {
-                auto const off_arr = readFromBytes<SpanOff, count>(ptr(pos + sizeof(size_t)));
                 std::array<std::span<prev_t const>, count> span_arr;
-                for (size_t i = 0; i != count; ++i)
-                    span_arr[i] = std::span{prev_addr(off_arr[i].base), off_arr[i].size};
+                for (auto p = span_arr.data(); auto [o, sz] : readFromBytes<SpanOff, count>(ptr(pos + sizeof(size_t))))
+                    *p++ = std::span{prev_addr(o), sz};
                 return span_arr;
             }();
             if constexpr (depth) return readRngs<next_pos, depth - 1>([](size_t i) { return &span_arr[i]; });
