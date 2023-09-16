@@ -207,18 +207,18 @@ template<typename T, typename WriteT>
 struct Recursive {};
 
 template<typename>
-constexpr auto writef();
+constexpr auto writeT();
 
 template<stdr::input_range Rng, size_t N = 0>
 constexpr auto writeNestedRngf() {
     using value_t = stdr::range_value_t<stdr::range_reference_t<Rng>>;
     if constexpr (stdr::input_range<value_t>) return writeNestedRngf<stdr::range_reference_t<Rng>, N + 1>();
     else
-        return NestedArray<N, decltype(writef<value_t>())>{};
+        return NestedArray<N, decltype(writeT<value_t>())>{};
 }
 
 template<typename T>
-constexpr auto writef() {
+constexpr auto writeT() {
     using DT = std::remove_cvref_t<T>;
     if constexpr (ToStaticDataMemFun<T> or ToStaticDataFreeFun<T>) {
         using static_t = decltype([](auto &&value) {
@@ -228,25 +228,25 @@ constexpr auto writef() {
         }(std::declval<T>()));
         if constexpr (std::is_base_of_v<recursive_base, DT> or is_recursive<DT>) return Recursive<DT, static_t>{};
         else
-            return CustomData<DT, decltype(writef<static_t>())>{};
+            return CustomData<DT, decltype(writeT<static_t>())>{};
     } else if constexpr (stdr::input_range<T>) {
         if constexpr (using value_t = stdr::range_value_t<T>; stdr::input_range<value_t>) return writeNestedRngf<DT>();
         else
-            return Array<decltype(writef<value_t>())>{};
+            return Array<decltype(writeT<value_t>())>{};
     } else if constexpr (Tuple<DT>)
         return applyIdxSeq<std::tuple_size_v<DT>>(
-                []<size_t... i> { return Tup<decltype(writef<std::tuple_element_t<i, DT>>())...>{}; });
+                []<size_t... i> { return Tup<decltype(writeT<std::tuple_element_t<i, DT>>())...>{}; });
     else if constexpr (is_specialization<DT, std::variant>)
         return applyIdxSeq<std::variant_size_v<DT>>(
-                []<size_t... i> { return Variant<decltype(writef<std::variant_alternative_t<i, DT>>())...>{}; });
+                []<size_t... i> { return Variant<decltype(writeT<std::variant_alternative_t<i, DT>>())...>{}; });
     else if constexpr (is_specialization<DT, std::optional>)
-        return Optional<decltype(writef<typename DT::value_type>())>{};
+        return Optional<decltype(writeT<typename DT::value_type>())>{};
     else if constexpr (is_specialization<DT, std::expected>)
-        return Expected<decltype(writef<typename DT::value_type>()), decltype(writef<typename DT::error_type>())>{};
+        return Expected<decltype(writeT<typename DT::value_type>()), decltype(writeT<typename DT::error_type>())>{};
     else if constexpr (std::is_pointer_v<DT>)
-        return Pointer<decltype(writef<std::remove_pointer_t<DT>>())>{};
+        return Pointer<decltype(writeT<std::remove_pointer_t<DT>>())>{};
     else if constexpr (is_specialization<DT, std::unique_ptr>)
-        return Pointer<decltype(writef<typename DT::element_type>())>{};
+        return Pointer<decltype(writeT<typename DT::element_type>())>{};
     else {
         static_assert(TrivialValue<DT>);
         return Trivial<DT>{};
@@ -254,19 +254,13 @@ constexpr auto writef() {
 }
 
 template<typename T>
-auto readf(T);
+auto readT(T);
 
 template<typename T, typename WT>
 class StaticPtr {
 public:
     constexpr auto &operator*() const {
-        using static_t = decltype([](auto static_v) {
-            if constexpr (requires { T::from_static_data(static_v); }) return T::from_static_data(static_v);
-            else if constexpr (requires { from_static_data(std::type_identity<T>{}, static_v); })
-                return from_static_data(std::type_identity<T>{}, static_v);
-            else
-                return static_v;
-        }(readf(writef<WT>())));
+        using static_t = decltype(readT(CustomData<T, decltype(writeT<WT>())>{}));
         return *static_cast<static_t const *>(data);
     }
 
@@ -282,47 +276,47 @@ private:
 };
 
 template<typename T>
-auto readf(Trivial<T>) -> T;
+auto readT(Trivial<T>) -> T;
 
 template<typename T>
-auto readf(Array<T>) -> std::span<decltype(readf(T{})) const>;
+auto readT(Array<T>) -> std::span<decltype(readT(T{})) const>;
 
 template<size_t N, typename T>
-auto readf(NestedArray<N, T>) {
-    if constexpr (N) return std::span<decltype(readf(NestedArray<N - 1, T>{})) const>{};
+auto readT(NestedArray<N, T>) {
+    if constexpr (N) return std::span<decltype(readT(NestedArray<N - 1, T>{})) const>{};
     else
-        return std::span<std::span<decltype(readf(T{})) const> const>{};
+        return std::span<std::span<decltype(readT(T{})) const> const>{};
 }
 
 template<typename... T>
-auto readf(Tup<T...>) -> std::tuple<decltype(readf(T{}))...>;
+auto readT(Tup<T...>) -> std::tuple<decltype(readT(T{}))...>;
 
 template<typename... T>
-auto readf(Variant<T...>) -> std::variant<decltype(readf(T{}))...>;
+auto readT(Variant<T...>) -> std::variant<decltype(readT(T{}))...>;
 
 template<typename T>
-auto readf(Optional<T>) -> std::optional<decltype(readf(T{}))>;
+auto readT(Optional<T>) -> std::optional<decltype(readT(T{}))>;
 
 template<typename T, typename E>
-auto readf(Expected<T, E>) -> std::expected<decltype(readf(T{})), decltype(readf(E{}))>;
+auto readT(Expected<T, E>) -> std::expected<decltype(readT(T{})), decltype(readT(E{}))>;
 
 template<typename E>
-auto readf(Expected<void, E>) -> std::expected<void, decltype(readf(E{}))>;
+auto readT(Expected<void, E>) -> std::expected<void, decltype(readT(E{}))>;
 
 template<typename T>
-auto readf(Pointer<T>) -> decltype(readf(T{})) const *;
+auto readT(Pointer<T>) -> decltype(readT(T{})) const *;
 
 template<typename T, typename WT>
-auto readf(CustomData<T, WT>) -> decltype([](auto read_v) {
+auto readT(CustomData<T, WT>) -> decltype([](auto read_v) {
     if constexpr (requires { T::from_static_data(read_v); }) return T::from_static_data(read_v);
     else if constexpr (requires { from_static_data(std::type_identity<T>{}, read_v); })
         return from_static_data(std::type_identity<T>{}, read_v);
     else
         return read_v;
-}(readf(WT{})));
+}(readT(WT{})));
 
 template<typename T, typename WT>
-auto readf(Recursive<T, WT>) -> StaticPtr<T, WT>;
+auto readT(Recursive<T, WT>) -> StaticPtr<T, WT>;
 
 template<size_t pos, typename value_type>
 struct Result {
@@ -339,7 +333,7 @@ template<auto &buffer>
 class Reader {
 public:
     template<typename T>
-    using read_t = decltype(readf(T{}));
+    using read_t = decltype(readT(T{}));
 
     template<size_t pos>
     static constexpr auto readAt(auto) = delete;
@@ -350,40 +344,20 @@ public:
     }
 
     template<size_t pos, typename T>
-    static constexpr auto readAt(Array<Trivial<T>>) {
-        constexpr auto data_pos = pos + sizeof(size_t);
-        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
-            return result<data_pos + sizeof array>(std::span<T const>{array});
-        } else
-            return result<data_pos>(read_t<Array<Trivial<T>>>{});
-    }
-
-    template<size_t pos, typename T>
     static constexpr auto readAt(Array<T>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            static constexpr auto res = readNTArray<data_pos, count, T>();
+            static constexpr auto res = readArray<data_pos, count>(T{});
             return result<res.next_pos>(std::span{res.value.data(), count});
         } else
             return result<data_pos>(read_t<Array<T>>{});
     }
 
     template<size_t pos, size_t N, typename T>
-    static constexpr auto readAt(NestedArray<N, Trivial<T>>) {
-        constexpr auto data_pos = pos + sizeof(size_t);
-        if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            static constexpr auto array = readFromBytes<T, count>(ptr(data_pos));
-            return readRngs<data_pos + sizeof array, N>([](size_t i) { return &array[i]; });
-        } else
-            return readRngs<data_pos, N>([](size_t) -> read_t<Trivial<T>> const * { return nullptr; });
-    }
-
-    template<size_t pos, size_t N, typename T>
     static constexpr auto readAt(NestedArray<N, T>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            static constexpr auto res = readNTArray<data_pos, count, T>();
+            static constexpr auto res = readArray<data_pos, count>(T{});
             return readRngs<res.next_pos, N>([](size_t i) { return res.value.data() + i; });
         } else
             return readRngs<data_pos, N>([](size_t) -> read_t<T> const * { return nullptr; });
@@ -459,7 +433,7 @@ public:
 
     template<size_t pos, typename T, typename WT>
     static constexpr auto readAt(Recursive<T, WT>) {
-        constexpr auto res = readAt<pos>(writef<WT>());
+        constexpr auto res = readAt<pos>(writeT<WT>());
         static constexpr auto rcrsv_value = [&] {
             if constexpr (requires { T::from_static_data(res.value); }) return T::from_static_data(res.value);
             else if constexpr (requires { from_static_data(std::type_identity<T>{}, res.value); })
@@ -485,7 +459,12 @@ private:
     }
 
     template<size_t pos, size_t count, typename T>
-    static constexpr auto readNTArray() {
+    static constexpr auto readArray(Trivial<T>) {
+        return result<pos + sizeof(T) * count>(readFromBytes<T, count>(ptr(pos)));
+    }
+
+    template<size_t pos, size_t count, typename T>
+    static constexpr auto readArray(T) {
         using value_t = read_t<T>;
         union Storage {
             value_t value;
@@ -540,11 +519,11 @@ consteval auto static_data(std::invocable auto func) {
         detail::writeAt(func(), ptr);
         return buffer;
     }();
-    return detail::Reader<buffer>::template readAt<0>(detail::writef<decltype(func())>()).value;
+    return detail::Reader<buffer>::template readAt<0>(detail::writeT<decltype(func())>()).value;
 }
 
 template<typename T>
-using static_data_t = decltype(detail::readf(detail::writef<T>()));
+using static_data_t = decltype(detail::readT(detail::writeT<T>()));
 }// namespace tek
 
 #endif
