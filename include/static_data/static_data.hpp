@@ -347,8 +347,7 @@ public:
     static constexpr auto readAt(Array<T>) {
         constexpr auto data_pos = pos + sizeof(size_t);
         if constexpr (constexpr auto count = readFromBytes<size_t>(ptr(pos))) {
-            static constexpr auto res = readArray<data_pos, count>(T{});
-            return result<res.next_pos>(std::span{res.value.data(), count});
+            return readArray<data_pos, count>(T{});
         } else
             return result<data_pos>(read_t<Array<T>>{});
     }
@@ -460,7 +459,8 @@ private:
 
     template<size_t pos, size_t count, typename T>
     static constexpr auto readArray(Trivial<T>) {
-        return result<pos + sizeof(T) * count>(readFromBytes<T, count>(ptr(pos)));
+        static constexpr auto array = readFromBytes<T, count>(ptr(pos));
+        return result<pos + sizeof array>(std::span{array.data(), array.size()});
     }
 
     template<size_t pos, size_t count, typename T>
@@ -471,11 +471,15 @@ private:
             constexpr Storage() {}
             constexpr ~Storage() {}
         };
-        std::array<std::conditional_t<std::is_default_constructible_v<value_t>, value_t, Storage>, count> array;
-        auto const res = readRcrsv<pos, T, 0, count>(array);
-        if constexpr (std::is_default_constructible_v<value_t>) return result<res.next_pos>(array);
-        else
-            return result<res.next_pos>(applyIdxSeq<count>([&]<size_t... i> { return std::array{array[i].value...}; }));
+        static constexpr auto res = [] {
+            std::array<std::conditional_t<std::is_default_constructible_v<value_t>, value_t, Storage>, count> array;
+            auto const res = readRcrsv<pos, T, 0, count>(array);
+            if constexpr (std::is_default_constructible_v<value_t>) return result<res.next_pos>(array);
+            else
+                return result<res.next_pos>(
+                        applyIdxSeq<count>([&]<size_t... i> { return std::array{array[i].value...}; }));
+        }();
+        return result<res.next_pos>(std::span{res.value.data(), res.value.size()});
     }
 
     template<size_t pos, size_t depth>
