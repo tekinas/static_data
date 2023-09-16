@@ -446,6 +446,12 @@ public:
 private:
     static constexpr auto ptr(size_t pos) { return buffer.data() + pos; }
 
+    template<size_t pos, size_t count, typename T>
+    static constexpr auto readArray(Trivial<T>) {
+        static constexpr auto array = readFromBytes<T, count>(ptr(pos));
+        return result<pos + sizeof array>(std::span{array.data(), array.size()});
+    }
+
     template<size_t pos, typename T, size_t index, size_t count>
     static constexpr auto readRcrsv(auto &array) {
         constexpr auto res = readAt<pos>(T{});
@@ -455,12 +461,6 @@ private:
         if constexpr ((index + 1) != count) return readRcrsv<res.next_pos, T, index + 1, count>(array);
         else
             return result<res.next_pos>(0);
-    }
-
-    template<size_t pos, size_t count, typename T>
-    static constexpr auto readArray(Trivial<T>) {
-        static constexpr auto array = readFromBytes<T, count>(ptr(pos));
-        return result<pos + sizeof array>(std::span{array.data(), array.size()});
     }
 
     template<size_t pos, size_t count, typename T>
