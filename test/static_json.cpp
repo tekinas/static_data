@@ -282,8 +282,91 @@ void print_json(tek::static_data_t<ast::json_value> json, size_t level = 0) {
 
 int main() {
     constexpr auto res = tek::static_data([] {
-        constexpr std::basic_string_view json_str =
-                u8R"%([true, false, null, 14124.2414E12, { "name" : "tekinas"}, [0, 1, 2, 3, true], {"1" : true, "2" : false, "3" : null, "4" : 14124.2414E12, "5" : { "name" : "tekinas"}, "6" : [0, 1, 2, 3, true]}])%";
+        using namespace std::string_view_literals;
+        constexpr auto json_str = u8R"%([
+  true,
+  false,
+  null,
+  14124241400000000,
+  {
+    "name": "tekinas"
+  },
+  [
+    0,
+    1,
+    2,
+    3,
+    true
+  ],
+  {
+    "1": true,
+    "2": false,
+    "3": null,
+    "4": 14124241400000000,
+    "5": {
+      "name": "tekinas"
+    },
+    "6": [
+      0,
+      1,
+      2,
+      3,
+      true
+    ]
+  },
+  [
+    true,
+    false,
+    null,
+    14124241400000000,
+    {
+      "name": "tekinas"
+    },
+    [
+      0,
+      1,
+      2,
+      3,
+      true
+    ],
+    {
+      "1": true,
+      "2": false,
+      "3": null,
+      "4": 14124241400000000,
+      "5": {
+        "name": "tekinas"
+      },
+      "6": [
+        0,
+        1,
+        2,
+        3,
+        true
+      ]
+    }
+  ],
+  [
+    {
+      "directory": "/home/tekinas/CLionProjects/static_data/build",
+      "command": "g++-trunk -Istatic_data_test.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DFMT_HEADER_ONLY=1 -MD -MQ static_data_test.p/test_static_data_test.cpp.o -MF static_data_test.p/test_static_data_test.cpp.o.d -o static_data_test.p/test_static_data_test.cpp.o -c ../test/static_data_test.cpp",
+      "file": "../test/static_data_test.cpp",
+      "output": "static_data_test.p/test_static_data_test.cpp.o"
+    },
+    {
+      "directory": "/home/tekinas/CLionProjects/static_data/build",
+      "command": "g++-trunk -Istatic_type_test.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DFMT_HEADER_ONLY=1 -MD -MQ static_type_test.p/test_static_type_test.cpp.o -MF static_type_test.p/test_static_type_test.cpp.o.d -o static_type_test.p/test_static_type_test.cpp.o -c ../test/static_type_test.cpp",
+      "file": "../test/static_type_test.cpp",
+      "output": "static_type_test.p/test_static_type_test.cpp.o"
+    },
+    {
+      "directory": "/home/tekinas/CLionProjects/static_data/build",
+      "command": "g++-trunk -Istatic_json.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DLEXY_HAS_UNICODE_DATABASE=1 -DFMT_HEADER_ONLY=1 -MD -MQ static_json.p/test_static_json.cpp.o -MF static_json.p/test_static_json.cpp.o.d -o static_json.p/test_static_json.cpp.o -c ../test/static_json.cpp",
+      "file": "../test/static_json.cpp",
+      "output": "static_json.p/test_static_json.cpp.o"
+    }
+  ]
+])%"sv;
         auto json = lexy::parse<grammar::json>(lexy::string_input(json_str), grammar::report_error{});
         if (json.is_error() or not json.has_value()) std::unreachable();
         return json.value();
