@@ -1,229 +1,15 @@
-#include <static_data/static_data.hpp>
+#include <static_data/static_json.hpp>
 
-#include <cstdint>
-#include <fmt/compile.h>
+#include <cassert>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
-#include <fmt/std.h>
-#include <lexy/action/base.hpp>
-#include <lexy/action/parse.hpp>
-#include <lexy/callback.hpp>
-#include <lexy/callback/container.hpp>
-#include <lexy/dsl.hpp>
-#include <lexy/dsl/base.hpp>
-#include <lexy/dsl/production.hpp>
-#include <lexy/grammar.hpp>
-#include <lexy/input/string_input.hpp>
-#include <optional>
-#include <ranges>
-#include <string_view>
-#include <type_traits>
-#include <utility>
-#include <variant>
-#include <vector>
 
 namespace {
-template<typename Key, typename Value>
-class UnorderedMap {
-public:
-    constexpr UnorderedMap() = default;
-    constexpr auto to_static_data() { return std::views::zip(keys, values); }
-    constexpr auto to_static_data() const { return std::views::zip(keys, values); }
-    constexpr bool empty() const { return keys.empty(); }
-    constexpr size_t size() const { return keys.size(); }
-    constexpr void reserve(size_t s) {
-        keys.reserve(s);
-        values.reserve(s);
-    }
-    constexpr void clear() {
-        keys.clear();
-        values.clear();
-    }
-    constexpr void emplace(auto &&...args) {
-        std::pair<Key, Value> ele{args...};
-        if (auto const itr = std::ranges::find(keys, ele.first); itr == keys.end()) {
-            keys.push_back(std::move(ele.first));
-            values.push_back(std::move(ele.second));
-        } else
-            values[itr - keys.begin()] = std::move(ele.second);
-    }
-    constexpr void insert(auto &&value) { emplace(value); }
-
-private:
-    std::vector<Key> keys;
-    std::vector<Value> values;
-};
-
-template<typename Char>
-class BasicString : public std::vector<char> {
-public:
-    constexpr BasicString() = default;
-    constexpr BasicString(auto b, auto e) : std::vector<char>(b, e) {}
-    constexpr BasicString &append(auto b, auto e) {
-        insert(end(), b, e);
-        return *this;
-    }
-    constexpr operator std::basic_string_view<Char>() const { return std::basic_string_view<Char>{data(), size()}; }
-    constexpr auto to_static_data() const { return std::span{*this}; }
-    static constexpr auto from_static_data(auto span) { return std::string_view{span}; }
-};
-
-using String = BasicString<char>;
-
-namespace ast {
-class json_value;
-using json_null = std::nullptr_t;
-using json_bool = bool;
-struct json_number {
-    int64_t integer;
-    std::optional<String> fraction;
-    std::optional<int16_t> exponent;
-};
-using json_string = String;
-using json_array = std::vector<json_value>;
-using json_object = UnorderedMap<String, json_value>;
-class json_value {
-public:
-    template<typename T>
-    explicit constexpr json_value(T t) : v(std::move(t)) {}
-    std::variant<json_null, json_bool, json_number, json_string, json_array, json_object> v;
-};
-
-constexpr auto to_static_data(json_number const &jn) {
-    return std::forward_as_tuple(jn.integer, jn.fraction, jn.exponent);
+template<size_t N>
+constexpr void template_for(auto &&func) {
+    [&]<size_t... I>(std::index_sequence<I...>) {
+        (func.template operator()<I>(), ...);
+    }(std::make_index_sequence<N>{});
 }
-constexpr auto &to_static_data(json_value const &jv) { return jv.v; }
-constexpr auto from_static_data(std::type_identity<json_number>, auto jn) {
-    struct json_number {
-        int64_t integer;
-        std::optional<std::string_view> fraction;
-        std::optional<int16_t> exponent;
-    };
-    return json_number{std::get<0>(jn), std::get<1>(jn), std::get<2>(jn)};
-}
-}// namespace ast
-}// namespace
-
-template<>
-constexpr bool tek::is_recursive<ast::json_value> = true;
-
-namespace {
-namespace grammar {
-namespace dsl = lexy::dsl;
-
-struct json_value;
-
-struct null : lexy::token_production {
-    static constexpr auto rule = dsl::lit<"null">;
-    static constexpr auto value = lexy::construct<ast::json_null>;
-};
-
-struct boolean : lexy::token_production {
-    struct true_ : lexy::transparent_production {
-        static constexpr auto rule = dsl::lit<"true">;
-        static constexpr auto value = lexy::constant(true);
-    };
-    struct false_ : lexy::transparent_production {
-        static constexpr auto rule = dsl::lit<"false">;
-        static constexpr auto value = lexy::constant(false);
-    };
-    static constexpr auto rule = dsl::p<true_> | dsl::p<false_>;
-    static constexpr auto value = lexy::forward<ast::json_bool>;
-};
-
-struct number : lexy::token_production {
-    struct integer : lexy::transparent_production {
-        static constexpr auto rule = dsl::minus_sign + dsl::integer<int64_t>(dsl::digits<>.no_leading_zero());
-        static constexpr auto value = lexy::as_integer<int64_t>;
-    };
-    struct fraction : lexy::transparent_production {
-        static constexpr auto rule = dsl::lit_c<'.'> >> dsl::capture(dsl::digits<>);
-        static constexpr auto value = lexy::as_string<String>;
-    };
-    struct exponent : lexy::transparent_production {
-        static constexpr auto rule = (dsl::lit_c<'e'> | dsl::lit_c<'E'>) >> (dsl::sign + dsl::integer<int16_t>);
-        static constexpr auto value = lexy::as_integer<int16_t>;
-    };
-    static constexpr auto rule = dsl::peek(dsl::lit_c<'-'> / dsl::digit<>) >>
-                                 (dsl::p<integer> + dsl::opt(dsl::p<fraction>) + dsl::opt(dsl::p<exponent>));
-    static constexpr auto value = lexy::construct<ast::json_number>;
-};
-
-struct string : lexy::token_production {
-    struct invalid_char {
-        static constexpr auto name = "invalid character in string literal";
-    };
-    static constexpr auto escaped_symbols = lexy::symbol_table<char>//
-                                                    .map<'"'>('"')
-                                                    .map<'\\'>('\\')
-                                                    .map<'/'>('/')
-                                                    .map<'b'>('\b')
-                                                    .map<'f'>('\f')
-                                                    .map<'n'>('\n')
-                                                    .map<'r'>('\r')
-                                                    .map<'t'>('\t');
-    struct code_point_id {
-        static constexpr auto rule = dsl::lit<"u"> >> dsl::code_unit_id<lexy::utf16_encoding, 4>;
-        static constexpr auto value = lexy::construct<lexy::code_point>;
-    };
-    static constexpr auto rule = dsl::quoted.limit(dsl::ascii::newline)(
-            (-dsl::unicode::control).error<invalid_char>,
-            dsl::backslash_escape.symbol<escaped_symbols>().rule(dsl::p<code_point_id>));
-    static constexpr auto value = lexy::as_string<ast::json_string, lexy::utf8_encoding>;
-};
-
-struct unexpected_trailing_comma {
-    static constexpr auto name = "unexpected trailing comma";
-};
-
-constexpr auto sep = dsl::sep(dsl::comma).trailing_error<unexpected_trailing_comma>;
-
-struct array {
-    static constexpr auto rule = dsl::square_bracketed.opt_list(dsl::recurse<json_value>, sep);
-    static constexpr auto value = lexy::as_list<ast::json_array>;
-};
-
-struct object {
-    static constexpr auto rule =
-            dsl::curly_bracketed.opt_list(dsl::p<string> + dsl::try_(dsl::colon) + dsl::recurse<json_value>, sep);
-    static constexpr auto value = lexy::as_collection<ast::json_object>;
-};
-
-struct json_value : lexy::transparent_production {
-    static constexpr auto name = "json value";
-    struct expected_json_value {
-        static constexpr auto name = "expected json value";
-    };
-    static constexpr auto rule = dsl::p<null> | dsl::p<boolean> | dsl::p<number> | dsl::p<string> | dsl::p<object> |
-                                 dsl::p<array> | dsl::error<expected_json_value>;
-    static constexpr auto value = lexy::construct<ast::json_value>;
-};
-
-struct json {
-    static constexpr auto max_recursion_depth = 19;
-    static constexpr auto whitespace = dsl::ascii::blank / dsl::ascii::newline;
-    static constexpr auto rule = dsl::p<json_value> + dsl::eof;
-    static constexpr auto value = lexy::forward<ast::json_value>;
-};
-
-struct report_error {
-    struct _sink {
-        using return_type = std::size_t;
-        template<typename Input, typename Reader, typename Tag>
-        constexpr void operator()(const lexy::error_context<Input> &, const lexy::error<Reader, Tag> &) {
-            std::unreachable();
-        }
-        constexpr std::size_t finish() && { return 0; }
-    };
-    constexpr auto sink() const { return _sink{}; }
-};
-}// namespace grammar
-}// namespace
-
-template<typename... Funcs>
-struct overload : Funcs... {
-    using Funcs::operator()...;
-};
 
 template<char ch, size_t max_n = 100>
 constexpr auto times_ch(size_t n) {
@@ -232,144 +18,168 @@ constexpr auto times_ch(size_t n) {
     return str.substr(0, n);
 }
 
-void print_json(tek::static_data_t<ast::json_value> json, size_t level = 0) {
+template<typename... Funcs>
+struct overload : Funcs... {
+    using Funcs::operator()...;
+};
+
+template<auto json>
+void print_json(size_t level = 0) {
     constexpr size_t lsize = 2;
-    std::visit(overload{[](tek::static_data_t<ast::json_null>) { fmt::print("null"); },
-                        [](tek::static_data_t<ast::json_bool> jb) { fmt::print("{}", jb); },
-                        [](tek::static_data_t<ast::json_number> jn) {
-                            fmt::print("{}", jn.integer);
-                            if (jn.fraction) fmt::print(".{}", *jn.fraction);
-                            if (jn.exponent) fmt::print("e{}", *jn.exponent);
-                        },
-                        [](tek::static_data_t<ast::json_string> js) {
-                            fmt::print("\"");
-                            for (auto c : js)
-                                if (c == '"') fmt::print(R"(\")");
-                                else if (c == '\\')
-                                    fmt::print(R"(\\)");
-                                else if (std::iscntrl(c) != 0)
-                                    fmt::print("\\x{:02x}", static_cast<unsigned char>(c));
-                                else
-                                    fmt::print("{}", c);
-                            fmt::print("\"");
-                        },
-                        [=](tek::static_data_t<ast::json_array> ja) {
-                            fmt::print("[\n");
-                            auto first = true;
-                            for (auto jvalue : ja) {
-                                if (first) first = false;
-                                else
-                                    fmt::print(",\n");
-                                fmt::print("{}", times_ch<' '>(lsize * (level + 1)));
-                                print_json(jvalue, level + 1);
-                            }
-                            fmt::print("\n{}]", times_ch<' '>(lsize * level));
-                        },
-                        [=](tek::static_data_t<ast::json_object> jo) {
-                            fmt::print("{{\n");
-                            auto first = true;
-                            for (auto &&[key, value] : jo) {
-                                if (first) first = false;
-                                else
-                                    fmt::print(",\n");
-                                fmt::print("{}{} : ", times_ch<' '>(lsize * (level + 1)), key);
-                                print_json(value, level + 1);
-                            }
-                            fmt::print("\n{}}}", times_ch<' '>(lsize * level));
-                        }},
-               *json);
+    if constexpr (json.kind == tek::json::kind::Object)
+        template_for<json.size()>([&]<size_t i> {
+            if constexpr (not i) fmt::print("{{\n");
+            else
+                fmt::print(",\n");
+            fmt::print("{}{} : ", times_ch<' '>(lsize * (level + 1)), json[tek::cv<i>].key);
+            print_json<json[tek::cv<i>].value>(level + 1);
+            if constexpr (i + 1 == json.size()) fmt::print("\n{}}}", times_ch<' '>(lsize * level));
+        });
+    else if constexpr (json.kind == tek::json::kind::Array)
+        template_for<json.size()>([&]<size_t i> {
+            if constexpr (not i) fmt::print("{{\n");
+            else
+                fmt::print(",\n");
+            fmt::print("{}", times_ch<' '>(lsize * (level + 1)));
+            print_json<json[tek::cv<i>]>(level + 1);
+            if constexpr (i + 1 == json.size()) fmt::print("\n{}}}", times_ch<' '>(lsize * level));
+        });
+    else
+        overload{[](std::nullptr_t) { fmt::print("null"); }, [](bool jb) { fmt::print("{}", jb); },
+                 [](int64_t ji) { fmt::print("{}", ji); },   [](uint64_t ji) { fmt::print("{}", ji); },
+                 [](double jf) { fmt::print("{}", jf); },    [](std::string_view js) { fmt::print("{}", js); }}(*json);
 }
 
+constexpr tek::json::value get_json() {
+    using namespace std::string_view_literals;
+    using namespace tek::json;
+    value v1 = nullptr;
+    value v2 = true;
+    value v3 = -124124;
+    value v4 = 1961824uz;
+    value v5 = 90121.2414f;
+    value v6 = 8912489124.87861274;
+    value v7 = "Hello"sv;
+    value v8{{1, 2, 4, 5, "124124"sv, 12412.1424, {{true, 5, 6}}, nullptr, true, false}};
+    value v9{{{"arg1", -9971837.1331},
+              {"arg2", 66612.21f},
+              {"arg3", 248001uz},
+              {"arg4", -5},
+              {"arg5", "STRING"},
+              {"arg6", -33333.1424},
+              {"arg7", nullptr},
+              {"arg8", true},
+              {"arg9", false},
+              {"arg10", {{1, 2, 4, 5, "124124", 12412.1424, nullptr, true, false}}},
+              {"arg11",
+               {{
+                       {"aa", 45},
+                       {"bb", -999868172},
+                       {"cc", 8888888111111111111uz},
+                       {"dd", 333333.42526446898998},
+                       {"ee", "JSON"},
+                       {"ff", 12412.1424},
+                       {"gg", nullptr},
+                       {"hh", true},
+                       {"ii", false},
+                       {"jj", {{1, 2, 4, 5, "EaRtH", 12412.1424, nullptr, true, false}}},
+               }}}}};
+    array v10{-1363187678, 16871389311uz, true, false, 90.13f, 2223.2424};
+    object v11{{"A", 0XDEADBEEF},
+               {"B", 077273147136z},
+               {"C", 4},
+               {"D", 5},
+               {"E", "FLOW"sv},
+               {"F", 12412.1424},
+               {"G", nullptr},
+               {"H", true},
+               {"I", false},
+               {"J", {{-111111111z, 22222222z, 99999999z, -666666z, "GRAPH", -8776676.31, nullptr, true, false}}},
+               {"K",
+                {{
+                        {"L", 1},
+                        {"M", 2},
+                        {"N", 4},
+                        {"O", 5},
+                        {"P", "124124"},
+                        {"Q", 12412.1424},
+                        {"R", nullptr},
+                        {"S", true},
+                        {"T", false},
+                        {"U", {{1, 2, 4, 5, "124124", 12412.1424, nullptr, true, false}}},
+                }}}};
+    array v12{true, false, true, false, nullptr, false, true};
+    return {{{"DATA",
+              {{v1,
+                v2,
+                v3,
+                v4,
+                v5,
+                v6,
+                v7,
+                v8,
+                v9,
+                v10,
+                v11,
+                v12,
+                {{v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12}}}}},
+             {"PLANE", -78517843136z}}};
+}
+}// namespace
+
 int main() {
-    constexpr auto res = tek::static_data([] {
-        using namespace std::string_view_literals;
-        constexpr auto json_str = u8R"%([
-  true,
-  false,
-  null,
-  14124241400000000,
-  {
-    "name": "tekinas"
-  },
-  [
-    0,
-    1,
-    2,
-    3,
-    true
-  ],
-  {
-    "1": true,
-    "2": false,
-    "3": null,
-    "4": 14124241400000000,
-    "5": {
-      "name": "tekinas"
-    },
-    "6": [
-      0,
-      1,
-      2,
-      3,
-      true
-    ]
-  },
-  [
-    true,
-    false,
-    null,
-    14124241400000000,
-    {
-      "name": "tekinas"
-    },
-    [
-      0,
-      1,
-      2,
-      3,
-      true
-    ],
-    {
-      "1": true,
-      "2": false,
-      "3": null,
-      "4": 14124241400000000,
-      "5": {
-        "name": "tekinas"
-      },
-      "6": [
-        0,
-        1,
-        2,
-        3,
-        true
-      ]
-    }
-  ],
-  [
-    {
-      "directory": "/home/tekinas/CLionProjects/static_data/build",
-      "command": "g++-trunk -Istatic_data_test.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DFMT_HEADER_ONLY=1 -MD -MQ static_data_test.p/test_static_data_test.cpp.o -MF static_data_test.p/test_static_data_test.cpp.o.d -o static_data_test.p/test_static_data_test.cpp.o -c ../test/static_data_test.cpp",
-      "file": "../test/static_data_test.cpp",
-      "output": "static_data_test.p/test_static_data_test.cpp.o"
-    },
-    {
-      "directory": "/home/tekinas/CLionProjects/static_data/build",
-      "command": "g++-trunk -Istatic_type_test.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DFMT_HEADER_ONLY=1 -MD -MQ static_type_test.p/test_static_type_test.cpp.o -MF static_type_test.p/test_static_type_test.cpp.o.d -o static_type_test.p/test_static_type_test.cpp.o -c ../test/static_type_test.cpp",
-      "file": "../test/static_type_test.cpp",
-      "output": "static_type_test.p/test_static_type_test.cpp.o"
-    },
-    {
-      "directory": "/home/tekinas/CLionProjects/static_data/build",
-      "command": "g++-trunk -Istatic_json.p -I. -I.. -I../include -I/home/tekinas/Documents/vcpkg/installed/x64-linux/include -fdiagnostics-color=always -D_FILE_OFFSET_BITS=64 -Wall -Winvalid-pch -Wextra -Wpedantic -O3 -Wall -Wextra -Wpedantic -pedantic -Wnon-virtual-dtor -Wcast-align -Wunused -Woverloaded-virtual -Wnarrowing -Wconversion -Wmisleading-indentation -Wduplicated-cond -Wduplicated-branches -Wlogical-op -Wnull-dereference -Wdouble-promotion -Wformat=2 -Wimplicit-fallthrough -std=c++26 -march=native -Wno-interference-size -ftemplate-backtrace-limit=0 -fconstexpr-ops-limit=4294967295 -ftemplate-depth=429496729 -fconstexpr-depth=2147483647 -fconstexpr-loop-limit=2147483647 -fconcepts-diagnostics-depth=2147483647 -DLEXY_HAS_UNICODE_DATABASE=1 -DFMT_HEADER_ONLY=1 -MD -MQ static_json.p/test_static_json.cpp.o -MF static_json.p/test_static_json.cpp.o.d -o static_json.p/test_static_json.cpp.o -c ../test/static_json.cpp",
-      "file": "../test/static_json.cpp",
-      "output": "static_json.p/test_static_json.cpp.o"
-    }
-  ]
-])%"sv;
-        auto json = lexy::parse<grammar::json>(lexy::string_input(json_str), grammar::report_error{});
-        if (json.is_error() or not json.has_value()) std::unreachable();
-        return json.value();
+    using namespace tek;
+    using namespace tek::literals;
+    print_json<static_json([] { return get_json(); })>(), fmt::print("\n");
+
+    fmt::print("{}\n", *static_json([] { return nullptr; }));
+    fmt::print("{}\n", *static_json([] { return true; }));
+    fmt::print("{}\n", *static_json([] { return false; }));
+    fmt::print("{}\n", *static_json([] { return -1324348798961387z; }));
+    fmt::print("{}\n", *static_json([] { return 9918936136781383uz; }));
+    fmt::print("{}\n", *static_json([] { return 666699999.76451613; }));
+    fmt::print("{}\n", *static_json([] { return "TEKINAS IS GENIUS"; }));
+    fmt::print("{}\n", *static_json([] { return json::array{0, 1, true, "FILTH"}; })[3_i]);
+    fmt::print("{}\n", *static_json([] { return json::object{{"FILTH", "TRUE FILTH"}}; })["FILTH"_k]);
+    fmt::print("{}\n", *static_json([] { return json::object{{"KEY", "VALUE"}}; })[0_i].value);
+
+    constexpr auto cj1 = static_json([] { return json::array{1, 2, true, false, "TEKINAS", nullptr}; });
+    static_assert(*cj1[0_i] == 1);
+    static_assert(*cj1[1_i] == 2);
+    static_assert(*cj1[2_i] == true);
+    static_assert(*cj1[3_i] == false);
+    static_assert(*cj1[4_i] == "TEKINAS");
+    static_assert(*cj1[5_i] == nullptr);
+
+    constexpr auto cj2 = static_json([] {
+        return json::object{{"A", 1}, {"B", 2}, {"C", true}, {"D", false}, {"E", "TEKINAS"}, {"F", nullptr}};
     });
-    print_json(res);
+    static_assert(*cj2["A"_k] == 1);
+    static_assert(*cj2["B"_k] == 2);
+    static_assert(*cj2["C"_k] == true);
+    static_assert(*cj2["D"_k] == false);
+    static_assert(*cj2["E"_k] == "TEKINAS");
+    static_assert(*cj2["F"_k] == nullptr);
+
+    static_assert(cj2[0_i].key == "A" and *cj2[0_i].value == 1);
+    static_assert(cj2[1_i].key == "B" and *cj2[1_i].value == 2);
+    static_assert(cj2[2_i].key == "C" and *cj2[2_i].value == true);
+    static_assert(cj2[3_i].key == "D" and *cj2[3_i].value == false);
+    static_assert(cj2[4_i].key == "E" and *cj2[4_i].value == "TEKINAS");
+    static_assert(cj2[5_i].key == "F" and *cj2[5_i].value == nullptr);
+
+    constexpr auto cj3 = static_json([] {
+        return json::array{json::array{
+                json::array{json::array{"TEKINAS", true, nullptr, 56565455122.1313, -664615376z, 11111119929121uz,
+                                        json::object{{"MANA", true}, {"NIRVANA", 987654321.123456789}}}}}};
+    });
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][0_i]);
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][1_i]);
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][2_i]);
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][3_i]);
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][4_i]);
+    fmt::print("{}\n", *cj3[0_i][0_i][0_i][5_i]);
+    auto const obj = cj3[0_i][0_i][0_i][6_i];
+    fmt::print("{} : {}\n", obj[0_i].key, *obj[0_i].value);
+    fmt::print("{} : {}\n", obj[1_i].key, *obj[1_i].value);
 }
