@@ -29,7 +29,7 @@ constexpr decltype(auto) applyIdxSeq(auto &&func) {
 }
 
 template<size_t N>
-constexpr void unroll(auto &&expr) {
+constexpr void template_for(auto &&expr) {
     applyIdxSeq<N>([&]<size_t... I> { (static_cast<void>(expr.template operator()<I>()), ...); });
 }
 
@@ -86,7 +86,7 @@ constexpr int int_v{};
 template<TrivialValue T>
 constexpr size_t writeToBytes(T value, std::byte *ptr) {
     using Bytes = std::array<std::byte, sizeof(T)>;
-    unroll<sizeof(T)>([ptr, bytes = std::bit_cast<Bytes>(value)]<size_t i> {
+    template_for<sizeof(T)>([ptr, bytes = std::bit_cast<Bytes>(value)]<size_t i> {
         if constexpr (requires { int_v<std::bit_cast<Bytes>(std::bit_cast<T>(Bytes{}))[i]>; }) ptr[i] = bytes[i];
     });
     return sizeof value;
