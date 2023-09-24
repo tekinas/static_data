@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <fmt/format.h>
+#include <utility>
 
 namespace {
 template<size_t N>
@@ -130,7 +131,9 @@ constexpr tek::json::value get_json() {
 int main() {
     using namespace tek;
     using namespace tek::json::literals;
-    print_json<static_json([] { return get_json(); })>(), fmt::print("\n");
+
+    constexpr auto cj0 = static_json([] { return get_json(); });
+    print_json<cj0>(), fmt::print("\n");
 
     fmt::print("{}\n", *static_json([] { return nullptr; }));
     fmt::print("{}\n", *static_json([] { return true; }));
