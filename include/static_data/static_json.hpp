@@ -1,5 +1,4 @@
-#include <static_data/static_data.hpp>
-
+#include "static_data.hpp"
 #include <algorithm>
 #include <charconv>
 #include <concepts>
@@ -81,31 +80,6 @@ fixed_string(const char_t (&str)[N]) -> fixed_string<char_t, N - 1>;
 template<auto value>
 class ConstValue {};
 }// namespace detail
-
-template<auto value>
-inline constexpr detail::ConstValue<value> cv{};
-
-namespace literals {
-template<char... ch>
-consteval auto operator""_i() {
-    constexpr auto value = [] -> std::optional<size_t> {
-        std::array const str{ch...};
-        size_t value;
-        auto const last = str.data() + str.size();
-        if (auto const [ptr, err] = std::from_chars(str.data(), last, value); err == std::errc{} and ptr == last)
-            return value;
-        return std::nullopt;
-    }();
-    if constexpr (value) return detail::ConstValue<*value>{};
-    else
-        static_assert(false, "invalid literal value");
-}
-
-template<detail::fixed_string str>
-consteval auto operator""_k() {
-    return detail::ConstValue<str>{};
-}
-}// namespace literals
 
 namespace json {
 enum class kind : uint8_t { Null, Bool, Int64, UInt64, Double, String, Array, Object };
@@ -200,7 +174,32 @@ public:
         return const_value<*std::get<1>(value_)[i]>{};
     }
 };
+
+namespace literals {
+template<char... ch>
+consteval auto operator""_i() {
+    constexpr auto value = [] -> std::optional<size_t> {
+        std::array const str{ch...};
+        size_t value;
+        auto const last = str.data() + str.size();
+        if (auto const [ptr, err] = std::from_chars(str.data(), last, value); err == std::errc{} and ptr == last)
+            return value;
+        return std::nullopt;
+    }();
+    if constexpr (value) return detail::ConstValue<*value>{};
+    else
+        static_assert(false, "invalid literal value");
+}
+
+template<detail::fixed_string str>
+consteval auto operator""_k() {
+    return detail::ConstValue<str>{};
+}
+}// namespace literals
 }// namespace json
+
+template<auto value>
+inline constexpr detail::ConstValue<value> cv{};
 
 template<typename Func>
     requires std::is_invocable_r_v<json::value, Func>

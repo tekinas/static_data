@@ -129,7 +129,7 @@ constexpr tek::json::value get_json() {
 
 int main() {
     using namespace tek;
-    using namespace tek::literals;
+    using namespace tek::json::literals;
     print_json<static_json([] { return get_json(); })>(), fmt::print("\n");
 
     fmt::print("{}\n", *static_json([] { return nullptr; }));
