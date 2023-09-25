@@ -24,31 +24,36 @@ struct overload : Funcs... {
     using Funcs::operator()...;
 };
 
+template<tek::detail::fixed_string fmt_str>
+[[gnu::noinline]] void printF(auto... args) {
+    fmt::print(fmt_str.value(), args...);
+}
+
 template<auto json>
-void print_json(size_t level = 0) {
+[[gnu::flatten]] void print_json(size_t level = 0) {
     constexpr size_t lsize = 2;
     if constexpr (json.kind == tek::json::kind::Object)
         template_for<json.size()>([&]<size_t i> {
-            if constexpr (not i) fmt::print("{{\n");
+            if constexpr (not i) printF<"{{\n">();
             else
-                fmt::print(",\n");
-            fmt::print("{}{} : ", times_ch<' '>(lsize * (level + 1)), json[tek::cv<i>].key);
+                printF<",\n">();
+            printF<"{}{} : ">(times_ch<' '>(lsize * (level + 1)), json[tek::cv<i>].key);
             print_json<json[tek::cv<i>].value>(level + 1);
-            if constexpr (i + 1 == json.size()) fmt::print("\n{}}}", times_ch<' '>(lsize * level));
+            if constexpr (i + 1 == json.size()) printF<"\n{}}}">(times_ch<' '>(lsize * level));
         });
     else if constexpr (json.kind == tek::json::kind::Array)
         template_for<json.size()>([&]<size_t i> {
-            if constexpr (not i) fmt::print("{{\n");
+            if constexpr (not i) printF<"{{\n">();
             else
-                fmt::print(",\n");
-            fmt::print("{}", times_ch<' '>(lsize * (level + 1)));
+                printF<",\n">();
+            printF<"{}">(times_ch<' '>(lsize * (level + 1)));
             print_json<json[tek::cv<i>]>(level + 1);
-            if constexpr (i + 1 == json.size()) fmt::print("\n{}}}", times_ch<' '>(lsize * level));
+            if constexpr (i + 1 == json.size()) printF<"\n{}}}">(times_ch<' '>(lsize * level));
         });
     else
-        overload{[](std::nullptr_t) { fmt::print("null"); }, [](bool jb) { fmt::print("{}", jb); },
-                 [](int64_t ji) { fmt::print("{}", ji); },   [](uint64_t ji) { fmt::print("{}", ji); },
-                 [](double jf) { fmt::print("{}", jf); },    [](std::string_view js) { fmt::print("{}", js); }}(*json);
+        overload{[](std::nullptr_t) { printF<"null">(); }, [](bool jb) { printF<"{}">(jb); },
+                 [](int64_t ji) { printF<"{}">(ji); },     [](uint64_t ji) { printF<"{}">(ji); },
+                 [](double jf) { printF<"{}">(jf); },      [](std::string_view js) { printF<"{}">(js); }}(*json);
 }
 
 constexpr tek::json::value get_json() {
@@ -133,18 +138,18 @@ int main() {
     using namespace tek::json::literals;
 
     constexpr auto cj0 = static_json([] { return get_json(); });
-    print_json<cj0>(), fmt::print("\n");
+    print_json<cj0>(), printF<"\n">();
 
-    fmt::print("{}\n", *static_json([] { return nullptr; }));
-    fmt::print("{}\n", *static_json([] { return true; }));
-    fmt::print("{}\n", *static_json([] { return false; }));
-    fmt::print("{}\n", *static_json([] { return -1324348798961387z; }));
-    fmt::print("{}\n", *static_json([] { return 9918936136781383uz; }));
-    fmt::print("{}\n", *static_json([] { return 666699999.76451613; }));
-    fmt::print("{}\n", *static_json([] { return "TEKINAS IS GENIUS"; }));
-    fmt::print("{}\n", *static_json([] { return json::array{0, 1, true, "FILTH"}; })[3_i]);
-    fmt::print("{}\n", *static_json([] { return json::object{{"FILTH", "TRUE FILTH"}}; })["FILTH"_k]);
-    fmt::print("{}\n", *static_json([] { return json::object{{"KEY", "VALUE"}}; })[0_i].value);
+    printF<"{}\n">(*static_json([] { return nullptr; }));
+    printF<"{}\n">(*static_json([] { return true; }));
+    printF<"{}\n">(*static_json([] { return false; }));
+    printF<"{}\n">(*static_json([] { return -1324348798961387z; }));
+    printF<"{}\n">(*static_json([] { return 9918936136781383uz; }));
+    printF<"{}\n">(*static_json([] { return 666699999.76451613; }));
+    printF<"{}\n">(*static_json([] { return "TEKINAS IS GENIUS"; }));
+    printF<"{}\n">(*static_json([] { return json::array{0, 1, true, "FILTH"}; })[3_i]);
+    printF<"{}\n">(*static_json([] { return json::object{{"FILTH", "TRUE FILTH"}}; })["FILTH"_k]);
+    printF<"{}\n">(*static_json([] { return json::object{{"KEY", "VALUE"}}; })[0_i].value);
 
     constexpr auto cj1 = static_json([] { return json::array{1, 2, true, false, "TEKINAS", nullptr}; });
     static_assert(*cj1[0_i] == 1);
@@ -176,13 +181,13 @@ int main() {
                 json::array{json::array{"TEKINAS", true, nullptr, 56565455122.1313, -664615376z, 11111119929121uz,
                                         json::object{{"MANA", true}, {"NIRVANA", 987654321.123456789}}}}}};
     });
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][0_i]);
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][1_i]);
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][2_i]);
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][3_i]);
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][4_i]);
-    fmt::print("{}\n", *cj3[0_i][0_i][0_i][5_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][0_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][1_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][2_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][3_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][4_i]);
+    printF<"{}\n">(*cj3[0_i][0_i][0_i][5_i]);
     auto const obj = cj3[0_i][0_i][0_i][6_i];
-    fmt::print("{} : {}\n", obj[0_i].key, *obj[0_i].value);
-    fmt::print("{} : {}\n", obj[1_i].key, *obj[1_i].value);
+    printF<"{} : {}\n">(obj[0_i].key, *obj[0_i].value);
+    printF<"{} : {}\n">(obj[1_i].key, *obj[1_i].value);
 }
