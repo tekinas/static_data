@@ -37,7 +37,7 @@ public:
 
     constexpr ValueMap(std::initializer_list<std::pair<std::string_view, Value>> init) {
         for (auto [str, val] : init)
-            if (std::ranges::find(keys, str) == keys.end()) {
+            if (not std::ranges::contains(keys, str)) {
                 keys.push_back(str);
                 values.push_back(std::move(val));
             }
