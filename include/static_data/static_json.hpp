@@ -151,13 +151,13 @@ public:
         return value_.size();
     }
 
-    template<size_t i>
+    template<std::integral auto i>
         requires(kind == json::kind::Array and i < size())
     static constexpr auto operator[](detail::ConstValue<i>) {
         return const_value<*value_[i]>{};
     }
 
-    template<size_t i>
+    template<std::integral auto i>
         requires(kind == json::kind::Object and i < size())
     static constexpr auto operator[](detail::ConstValue<i>) {
         return ObjElem<i>{};
@@ -178,17 +178,33 @@ public:
 namespace literals {
 template<char... ch>
 consteval auto operator""_i() {
-    constexpr auto value = [] -> std::optional<size_t> {
+    constexpr auto value = [] -> std::optional<unsigned long long> {
         std::array const str{ch...};
-        size_t value;
+        auto start = str.data();
+        auto base = 10;
+        if (str.size() >= 2) {
+            if (auto const d = str[1]; str[0] == '0') {
+                if (d == 'b' or d == 'B') {
+                    base = 2;
+                    start += 2;
+                } else if (d == 'x' or d == 'X') {
+                    base = 16;
+                    start += 2;
+                } else {
+                    base = 8;
+                    ++start;
+                }
+            }
+        }
+        unsigned long long value;
         auto const last = str.data() + str.size();
-        if (auto const [ptr, err] = std::from_chars(str.data(), last, value); err == std::errc{} and ptr == last)
+        if (auto const [ptr, err] = std::from_chars(start, last, value, base); err == std::errc{} and ptr == last)
             return value;
-        return std::nullopt;
+        return {};
     }();
     if constexpr (value) return detail::ConstValue<*value>{};
     else
-        static_assert(false, "invalid literal value");
+        static_assert(false, "invalid integer literal");
 }
 
 template<detail::fixed_string str>
