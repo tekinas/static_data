@@ -157,6 +157,11 @@ fixed_string(const char_t (&str)[N]) -> fixed_string<char_t, N - 1>;
 
 template<auto value>
 class ConstValue {};
+
+template<typename... Funcs>
+struct overload : Funcs... {
+    using Funcs::operator()...;
+};
 }// namespace detail
 
 namespace json {
@@ -195,14 +200,14 @@ public:
 
     constexpr auto kind() const { return json::kind{static_cast<std::underlying_type_t<json::kind>>(m_Value.index())}; }
 
-    template<typename Func>
-    constexpr auto visit(Func &&func) {
-        return std::visit(std::forward<Func>(func), m_Value);
+    template<typename... Func>
+    constexpr auto visit(Func &&...func) {
+        return std::visit(detail::overload{std::forward<Func>(func)...}, m_Value);
     }
 
-    template<typename Func>
-    constexpr auto visit(Func &&func) const {
-        return std::visit(std::forward<Func>(func), m_Value);
+    template<typename... Func>
+    constexpr auto visit(Func &&...func) const {
+        return std::visit(detail::overload{std::forward<Func>(func)...}, m_Value);
     }
 
     constexpr auto &to_static_data() const { return m_Value; }

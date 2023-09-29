@@ -66,7 +66,7 @@ constexpr tek::json::value get_json() {
     value v6 = 8912489124.87861274;
     value v7 = "Hello"sv;
     value v8{{1, 2, 4, 5, "124124"sv, 12412.1424, {{true, 5, 6}}, nullptr, true, false}};
-    v8.visit(overload{[](auto &&) {}, [](array &a) { a.push_back("ELViS"); }});
+    v8.visit([](auto &&) {}, [](array &a) { a.push_back("ELViS"); });
     value v9{{{"arg1", -9971837.1331},
               {"arg2", 66612.21f},
               {"arg3", 248001uz},
@@ -165,10 +165,7 @@ constexpr auto get_json1() {
     }
     obj["Theta"] = {{"TeKiNaS", true, nullptr, false, 88931.133, {{-21875, 781981uz}}}};
     obj["CHARS"] = {{'@', '!', '$', '#'}};
-    obj["Text"].visit(overload{[](auto &&) {},
-                               [](array &arr) {
-                                   arr.insert(arr.end(), {true, false, nullptr, 612.9824f});
-                               }});
+    obj["Text"].visit([](auto &&) {}, [](array &arr) { arr.insert(arr.end(), {true, false, nullptr, 612.9824f}); });
     array arr1{(*obj.find("Alpha")).key,
                (*obj.find("Alpha")).value,
                (*obj.find("Text")).value,
