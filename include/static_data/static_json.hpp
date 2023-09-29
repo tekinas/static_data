@@ -1,3 +1,6 @@
+#ifndef TEK_STATIC_JSON
+#define TEK_STATIC_JSON
+
 #include "static_data.hpp"
 #include <algorithm>
 #include <charconv>
@@ -7,6 +10,8 @@
 #include <cstring>
 #include <functional>
 #include <initializer_list>
+#include <iterator>
+#include <ranges>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
@@ -16,37 +21,110 @@
 
 namespace tek {
 namespace detail {
-class CString {
-public:
-    constexpr CString() = default;
-    template<std::convertible_to<std::string_view> S>
-    constexpr CString(S &&str) : str{std::forward<S>(str)} {}
-    constexpr bool operator==(CString const &) const = default;
-    constexpr bool operator==(std::string_view s) const { return str == s; }
-    constexpr auto &to_static_data() const { return str; }
-    static constexpr auto from_static_data(std::span<char const> span) { return std::string_view{span}; }
-
-private:
-    std::string str;
-};
+namespace stdr = std::ranges;
+namespace vws = std::views;
 
 template<typename Value>
 class ValueMap {
 public:
+    template<bool const_value>
+    struct key_value {
+        std::string_view key;
+        std::conditional_t<const_value, Value const &, Value &> value;
+    };
+
     constexpr ValueMap() = default;
 
     constexpr ValueMap(std::initializer_list<std::pair<std::string_view, Value>> init) {
-        for (auto [str, val] : init)
-            if (not std::ranges::contains(keys, str)) {
-                keys.push_back(str);
-                values.push_back(std::move(val));
-            }
+        for (auto [str, val] : init) emplace(str, std::move(val));
+    }
+
+    constexpr bool operator==(ValueMap const &other) const {
+        if (size() != other.size()) return false;
+        return stdr::is_permutation(keys, other.keys) and stdr::is_permutation(values, other.values);
+    }
+
+    constexpr auto begin() { return get_view(*this).begin(); }
+    constexpr auto begin() const { return get_view(*this).begin(); }
+
+    constexpr auto end() { return get_view(*this).end(); }
+    constexpr auto end() const { return get_view(*this).end(); }
+
+    constexpr auto size() const { return keys.size(); }
+
+    constexpr bool empty() const { return keys.empty(); }
+
+    constexpr void clear() {
+        keys.clear();
+        values.clear();
+    }
+
+    constexpr auto capacity() const { return keys.capacity(); }
+
+    constexpr void reserve(size_t sz) {
+        keys.reserve(sz);
+        values.reserve(sz);
+    }
+
+    constexpr bool contains(std::string_view key) const { return stdr::contains(keys, key); }
+
+    constexpr auto find(std::string_view key) { return find_impl(*this, key); }
+    constexpr auto find(std::string_view key) const { return find_impl(*this, key); }
+
+    template<std::random_access_iterator Itr>
+        requires(std::same_as<key_value<true>, std::iter_value_t<Itr>> or
+                 std::same_as<key_value<false>, std::iter_value_t<Itr>>)
+    constexpr void erase(Itr itr) {
+        auto const dist = [&] {
+            if constexpr (std::same_as<key_value<true>, std::iter_value_t<Itr>>)
+                return stdr::distance(std::as_const(*this).begin(), itr);
+            else
+                return stdr::distance(begin(), itr);
+        }();
+        keys.erase(stdr::next(keys.begin(), dist));
+        values.erase(stdr::next(values.begin(), dist));
+    }
+
+    constexpr bool erase(std::string_view key) {
+        if (auto const itr = find(key); itr != end()) {
+            erase(itr);
+            return true;
+        }
+        return false;
+    }
+
+    constexpr Value &operator[](std::string_view key) {
+        if (auto const itr = find(key); itr != end()) return (*itr).value;
+        keys.emplace_back(key);
+        return values.emplace_back();
+    }
+
+    template<std::convertible_to<Value> Arg>
+    constexpr auto emplace(std::string_view key, Arg &&arg) {
+        if (auto const itr = find(key); itr != end()) return std::pair{itr, false};
+        keys.emplace_back(key);
+        values.emplace_back(std::forward<Arg>(arg));
+        return std::pair{stdr::prev(end()), true};
     }
 
     constexpr auto to_static_data() const { return std::forward_as_tuple(keys, values); }
 
 private:
-    std::vector<CString> keys;
+    template<typename T>
+    static constexpr auto get_view(T &&this_) {
+        return vws::zip(this_.keys, this_.values) | vws::transform([](auto &&elm) {
+                   return key_value<std::is_const_v<std::remove_reference_t<T>>>{std::get<0>(elm), std::get<1>(elm)};
+               });
+    }
+
+    template<typename T>
+    static constexpr auto find_impl(T &&this_, std::string_view key) {
+        if (auto const itr = stdr::find(this_.keys, key); itr != this_.keys.end())
+            return stdr::next(this_.begin(), stdr::distance(this_.keys.begin(), itr));
+        return this_.end();
+    }
+
+    std::vector<std::string> keys;
     std::vector<Value> values;
 };
 
@@ -56,7 +134,7 @@ struct fixed_string {
     using str_view = std::basic_string_view<value_type>;
 
     constexpr fixed_string(str_view str) {
-        if constexpr (N) std::ranges::copy_n(str.data(), N, m_Value.data());
+        if constexpr (N) stdr::copy_n(str.data(), N, m_Value.data());
     }
 
     constexpr fixed_string(value_type const (&str)[N + 1]) : fixed_string{str_view{str, N}} {}
@@ -113,10 +191,24 @@ public:
 
     constexpr value(object objs) : m_Value{std::in_place_index<7>, std::move(objs)} {}
 
+    constexpr bool operator==(value const &) const = default;
+
+    constexpr auto kind() const { return json::kind{static_cast<std::underlying_type_t<json::kind>>(m_Value.index())}; }
+
+    template<typename Func>
+    constexpr auto visit(Func &&func) {
+        return std::visit(std::forward<Func>(func), m_Value);
+    }
+
+    template<typename Func>
+    constexpr auto visit(Func &&func) const {
+        return std::visit(std::forward<Func>(func), m_Value);
+    }
+
     constexpr auto &to_static_data() const { return m_Value; }
 
 private:
-    std::variant<std::nullptr_t, bool, int64_t, uint64_t, double, detail::CString, array, object> m_Value;
+    std::variant<std::nullptr_t, bool, int64_t, uint64_t, double, std::string, array, object> m_Value;
 };
 
 template<auto &jv>
@@ -126,7 +218,7 @@ private:
 
     template<size_t i>
     struct ObjElem {
-        static constexpr auto key = std::get<0>(value_)[i];
+        static constexpr std::string_view key{std::get<0>(value_)[i]};
         static constexpr auto value = const_value<*std::get<1>(value_)[i]>{};
     };
 
@@ -136,7 +228,9 @@ public:
     constexpr auto operator*() const
         requires(not(kind == json::kind::Array or kind == json::kind::Object))
     {
-        return value_;
+        if constexpr (kind == json::kind::String) return std::string_view{value_};
+        else
+            return value_;
     }
 
     static constexpr auto size()
@@ -169,7 +263,7 @@ public:
         constexpr auto i = [] {
             auto const keys = std::get<0>(value_);
             for (size_t i{}; i != size(); ++i)
-                if (keys[i] == key) return i;
+                if (std::string_view{keys[i]} == key) return i;
         }();
         return const_value<*std::get<1>(value_)[i]>{};
     }
@@ -196,8 +290,8 @@ consteval auto operator""_i() {
                 }
             }
         }
-        unsigned long long value;
         auto const last = str.data() + str.size();
+        unsigned long long value;
         if (auto const [ptr, err] = std::from_chars(start, last, value, base); err == std::errc{} and ptr == last)
             return value;
         return {};
@@ -223,3 +317,5 @@ consteval auto static_json(Func func) {
     return json::const_value<*tek::static_data([=] { return std::invoke_r<json::value>(func); })>{};
 }
 }// namespace tek
+
+#endif

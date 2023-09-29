@@ -14,7 +14,9 @@
 #include <vector>
 
 namespace tek {
-struct recursive_base {};
+struct recursive_base {
+    constexpr auto operator<=>(recursive_base const &) const = default;
+};
 
 template<typename>
 constexpr bool is_recursive = false;
